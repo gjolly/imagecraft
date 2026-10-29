@@ -199,6 +199,34 @@ def test_format_device_missing_device(tmp_path):
         )
 
 
+@pytest.mark.parametrize("populate", [True, False])
+def test_format_device_btrfs(mocker, content, device, populate):
+    mocked_run = mocker.patch("imagecraft.pack.diskutil.run", autospec=True)
+    with device.open("wb") as image:
+        image.truncate(1 << 30)
+    diskutil.format_device(
+        device_path=device,
+        fstype=FileSystem.BTRFS,
+        content_dir=content if populate else None,
+        label="writable",
+        uuid="01234567-89ab-cdef-0123-456789abcdef",
+    )
+    args = ["--byte-count", str(1 << 30), "--sectorsize", "4096"]
+    if populate:
+        args.extend(["--rootdir", content])
+    mocked_run.assert_called_once_with(
+        "mkfs.btrfs",
+        *args,
+        "-L",
+        "writable",
+        "-U",
+        "01234567-89ab-cdef-0123-456789abcdef",
+        device,
+        stdout=ANY,
+        stderr=ANY,
+    )
+
+
 def test_format_device_no_content_dir(mocker, device):
     """format_device with no content_dir omits -d from mke2fs."""
     mocked_run = mocker.patch(

@@ -162,6 +162,9 @@ class FileSystem(enum.Enum):
     EXT3 = "ext3"
     """The ext3 filesystem."""
 
+    BTRFS = "btrfs"
+    """The Btrfs filesystem."""
+
     FAT16 = "fat16"
     """The FAT16 filesystem."""
 

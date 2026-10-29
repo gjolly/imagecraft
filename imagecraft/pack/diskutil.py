@@ -131,6 +131,33 @@ def _format_populate_ext_partition(
         run("mke2fs", *mke2fs_args, stdout=stream, stderr=stream)
 
 
+def _format_populate_btrfs_partition(
+    *,
+    content_dir: Path | None,
+    partitionpath: Path,
+    label: str | None = None,
+    uuid: str | None = None,
+) -> None:
+    """Create a single-device Btrfs filesystem without mounting it."""
+    # FUSE-backed partition files reject growth if --rootdir needs more space.
+    # Specify a sector size independent of the build host's page size.
+    args: list[str | Path] = [
+        "--byte-count",
+        str(partitionpath.stat().st_size),
+        "--sectorsize",
+        "4096",
+    ]
+    if content_dir is not None:
+        args.extend(["--rootdir", content_dir])
+    if label is not None:
+        args.extend(["-L", label])
+    if uuid is not None:
+        args.extend(["-U", uuid])
+    args.append(partitionpath)
+    with emit.open_stream(f"Creating btrfs partition (label: {label!r})") as stream:
+        run("mkfs.btrfs", *args, stdout=stream, stderr=stream)
+
+
 def _format_populate_fat_partition(  # pylint: disable=too-many-arguments
     *,
     fattype: FatT,
@@ -213,6 +240,15 @@ def format_device(
     """
     if not device_path.exists():
         raise CraftError(f"Device {device_path} does not exist")
+
+    if fstype == FileSystem.BTRFS:
+        _format_populate_btrfs_partition(
+            content_dir=content_dir,
+            partitionpath=device_path,
+            label=label,
+            uuid=uuid,
+        )
+        return
 
     if fstype.value.startswith("ext"):
         _format_populate_ext_partition(

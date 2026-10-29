@@ -189,6 +189,7 @@ class ImagecraftPackService(PackageService):
     def _metadata_path_supports_permissions(self, partition_name: str) -> bool:
         """Return True when the metadata path is on a filesystem with Unix mode bits."""
         return self._partition_filesystem(partition_name) in {
+            FileSystem.BTRFS,
             FileSystem.EXT3,
             FileSystem.EXT4,
         }
