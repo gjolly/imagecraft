@@ -173,6 +173,52 @@ The following keys can be declared for each partition listed in the volume's
 .. kitbash-field:: GPTStructureItem filesystem
     :prepend-name: volumes.<volume-name>.structure.<partition>
 
+Btrfs root filesystems
+~~~~~~~~~~~~~~~~~~~~~~
+
+Set ``filesystem: btrfs`` on the root partition to create a single-device Btrfs
+filesystem. Files are placed in the top-level subvolume. Btrfs requires EFI boot,
+a separate ext4 partition mapped to ``/boot``, and a vfat EFI System Partition
+mapped to ``/boot/efi``. Other partitions cannot use Btrfs yet.
+
+Include Btrfs support in the image's kernel and initramfs. For Ubuntu images,
+include ``btrfs-progs`` before generating the initramfs. When supplying an
+``/etc/fstab``, use ``btrfs`` for the root entry and set its fsck pass to ``0``.
+Imagecraft preserves options in existing fstab entries.
+
+For example, use the following partition layout and mount mappings:
+
+.. code-block:: yaml
+
+    volumes:
+      pc:
+        schema: gpt
+        structure:
+          - name: efi
+            type: C12A7328-F81F-11D2-BA4B-00A0C93EC93B
+            filesystem: vfat
+            role: system-boot
+            size: 256M
+          - name: boot
+            type: 0FC63DAF-8483-4772-8E79-3D69D8477DE4
+            filesystem: ext4
+            role: system-boot
+            size: 1G
+          - name: rootfs
+            type: 0FC63DAF-8483-4772-8E79-3D69D8477DE4
+            filesystem: btrfs
+            role: system-data
+            size: 6G
+
+    filesystems:
+      default:
+        - mount: /
+          device: (volume/pc/rootfs)
+        - mount: /boot
+          device: (volume/pc/boot)
+        - mount: /boot/efi
+          device: (volume/pc/efi)
+
 .. kitbash-field:: GPTStructureItem filesystem_label
     :prepend-name: volumes.<volume-name>.structure.<partition>
 

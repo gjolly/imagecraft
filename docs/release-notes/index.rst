@@ -11,6 +11,14 @@ bug fixes and backwards-incompatible changes in each version. It also contains t
 release and support policies for Imagecraft.
 
 
+Upcoming changes
+----------------
+
+Images can use a Btrfs root filesystem with EFI boot and a separate ext4
+``/boot`` partition. See :ref:`reference-imagecraft-yaml` for the layout and
+initramfs requirements.
+
+
 Current releases
 ----------------
 

@@ -10,6 +10,7 @@ backends
 Bazel
 boolean
 bootable
+Btrfs
 Bundler
 Canonical('s)?
 Charmcraft
@@ -30,6 +31,7 @@ filesets?
 filetree
 fonts
 freefont
+fsck
 fstab
 Furo
 github
@@ -41,6 +43,7 @@ gzip(ped)?
 html
 https
 ing
+initramfs
 Intersphinx
 io
 ip
@@ -103,6 +106,7 @@ Starcraft
 subkey
 subproject
 subprojects
+subvolume
 sudo
 SVG
 sysfs
@@ -121,6 +125,7 @@ URL
 utils
 uv
 venv
+vfat
 VMs
 WCAG
 whitespace
