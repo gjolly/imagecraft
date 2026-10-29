@@ -57,6 +57,9 @@ endif
 ifeq ($(shell which mke2fs),)
 APT_PACKAGES += e2fsprogs
 endif
+ifeq ($(shell which mkfs.btrfs),)
+APT_PACKAGES += btrfs-progs
+endif
 ifeq ($(shell which sfdisk),)
 APT_PACKAGES += fdisk
 endif
