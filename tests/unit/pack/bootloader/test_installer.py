@@ -500,6 +500,20 @@ class TestBootFstab:
 
 
 class TestConfigureFstab:
+    def test_btrfs_defaults(self, tmp_path):
+        configure_fstab(tmp_path, "root-uuid", filesystem=FileSystem.BTRFS)
+        assert (
+            "UUID=root-uuid / btrfs defaults 0 0\n"
+            in (tmp_path / "etc/fstab").read_text()
+        )
+
+    def test_preserves_btrfs_options(self, tmp_path):
+        fstab = tmp_path / "etc/fstab"
+        fstab.parent.mkdir()
+        fstab.write_text("LABEL=writable / btrfs compress=zstd 0 0\n")
+        configure_fstab(tmp_path, "root-uuid", filesystem=FileSystem.BTRFS)
+        assert fstab.read_text() == "UUID=root-uuid / btrfs compress=zstd 0 0\n"
+
     @pytest.mark.parametrize("mountpoint", ["/boot", "/boot/"])
     def test_preserves_existing_boot_entry(self, tmp_path, mountpoint):
         fstab = tmp_path / "etc/fstab"

@@ -37,6 +37,7 @@ from pydantic import (
 from typing_extensions import override
 
 from imagecraft.models.volume import (
+    FileSystem,
     StructureItem,
     Volume,
     VolumeName,
@@ -186,6 +187,45 @@ class Project(BaseProject):
         frozen=False,
         populate_by_name=True,
     )
+
+    @model_validator(mode="after")
+    def _validate_btrfs_layout(self) -> Self:
+        """Require EFI and a separate ext4 /boot for Btrfs root filesystems."""
+        for volume_name, volume in self.volumes.items():
+            btrfs_items = [
+                item for item in volume.structure if item.filesystem == FileSystem.BTRFS
+            ]
+            if not btrfs_items:
+                continue
+            mounts = {
+                entry["mount"].rstrip("/") or "/": str(entry["device"]).strip("()")
+                for entry in self.filesystems.get("default", [])
+            }
+            if len(btrfs_items) != 1 or mounts.get("/") != get_partition_name(
+                volume_name, btrfs_items[0]
+            ):
+                raise ValueError("Btrfs is only supported for the root filesystem.")
+            esp = volume.esp_partition
+            if (
+                esp is None
+                or esp.filesystem != FileSystem.VFAT
+                or mounts.get("/boot/efi") != get_partition_name(volume_name, esp)
+            ):
+                raise ValueError(
+                    "Btrfs root filesystems require EFI boot with a vfat EFI System "
+                    "Partition mounted at /boot/efi."
+                )
+            if not any(
+                item is not btrfs_items[0]
+                and item is not esp
+                and item.filesystem == FileSystem.EXT4
+                and mounts.get("/boot") == get_partition_name(volume_name, item)
+                for item in volume.structure
+            ):
+                raise ValueError(
+                    "Btrfs root filesystems require a separate ext4 partition mounted at /boot."
+                )
+        return self
 
     @override
     @classmethod

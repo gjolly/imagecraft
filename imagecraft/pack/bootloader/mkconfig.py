@@ -37,6 +37,7 @@ from uuid import UUID, uuid4
 
 from craft_cli import emit
 
+from imagecraft.models import FileSystem
 from imagecraft.pack.bootloader.chrootenv import (
     require_chroot_binary,
     run_checked,
@@ -89,7 +90,12 @@ case "$target" in
   device)
     if [ "$path" = "/boot" ]; then echo "%(boot_device)s"; else echo "%(root_device)s"; fi
     ;;
-  fs) echo "ext2" ;;
+  fs)
+    case "$device:$path" in
+      "%(boot_device)s:"*|*:/boot|*:/boot/*) echo "ext2" ;;
+      *) echo "%(root_fs)s" ;;
+    esac
+    ;;
   fs_uuid)
     if [ "$device" = "%(boot_device)s" ]; then echo "%(boot_uuid)s"; else echo "%(root_uuid)s"; fi
     ;;
@@ -237,6 +243,7 @@ def generate_grub_cfg(
     extra_partition_mounts: Sequence[tuple[str, Path]] | None = None,
     boot_uuid: UUID | str | None = None,
     partition_map: str = "gpt",
+    root_filesystem: FileSystem = FileSystem.EXT4,
 ) -> Path:
     """Generate /boot/grub/grub.cfg using the guest rootfs's grub-mkconfig.
 
@@ -251,6 +258,7 @@ def generate_grub_cfg(
         partition's filesystem, if any.
     :param partition_map: The image's partition table format as GRUB calls
         it (``gpt`` or ``msdos``).
+    :param root_filesystem: The root partition's filesystem type.
     :return: Host-side path of the generated grub.cfg.
     :raises errors.BootloaderToolsMissingError: If grub-mkconfig isn't
         present in the staged rootfs.
@@ -261,6 +269,13 @@ def generate_grub_cfg(
     )
     probe_rel = require_chroot_binary(
         root_dir, "grub-probe", extra_search_dirs=extra_search_dirs
+    )
+    relpath_rel = (
+        require_chroot_binary(
+            root_dir, "grub-mkrelpath", extra_search_dirs=extra_search_dirs
+        )
+        if root_filesystem == FileSystem.BTRFS
+        else None
     )
 
     root_uuid_str = str(root_uuid)
@@ -276,7 +291,7 @@ def generate_grub_cfg(
         f"GRUB_DEVICE_UUID={root_uuid_str}\n"
         f"GRUB_DEVICE_BOOT={fake_boot_device}\n"
         f"GRUB_DEVICE_BOOT_UUID={boot_uuid_str}\n"
-        "GRUB_FS=ext4\n"
+        f"GRUB_FS={'btrfs' if root_filesystem == FileSystem.BTRFS else 'ext4'}\n"
         "GRUB_DEVICE_PARTUUID=\n"
         "GRUB_DEVICE_BOOT_PARTUUID=\n"
         "GRUB_DISABLE_LINUX_PARTUUID=true\n"
@@ -292,6 +307,7 @@ def generate_grub_cfg(
         "root_uuid": root_uuid_str,
         "boot_uuid": boot_uuid_str,
         "partmap": partition_map,
+        "root_fs": "btrfs" if root_filesystem == FileSystem.BTRFS else "ext2",
     }
     with tempfile.NamedTemporaryFile(
         "w", prefix="imagecraft-grub-probe-shim-", suffix=".sh", delete=False
@@ -308,6 +324,25 @@ def generate_grub_cfg(
             options=["--bind"],
         )
     ]
+    relpath_shim: Path | None = None
+    if relpath_rel is not None:
+        # GRUB's Btrfs handling probes the root subvolume with grub-mkrelpath.
+        # Prime is a host directory, but the image uses the top-level subvolume.
+        # Use chroot paths; dedicated /boot paths are normalized below.
+        with tempfile.NamedTemporaryFile(
+            "w", prefix="imagecraft-grub-mkrelpath-shim-", suffix=".sh", delete=False
+        ) as relpath_file:
+            relpath_file.write("#!/bin/sh\nprintf '%s\\n' \"$1\"\n")
+            relpath_shim = Path(relpath_file.name)
+        relpath_shim.chmod(0o755)
+        extra_mounts.append(
+            Mount(
+                fstype=None,
+                src=str(relpath_shim),
+                relative_mountpoint=f"/{relpath_rel}",
+                options=["--bind"],
+            )
+        )
     chroot = build_prime_chroot(
         root_dir,
         boot_dir=boot_dir,
@@ -323,6 +358,8 @@ def generate_grub_cfg(
         )
     finally:
         shim_path.unlink(missing_ok=True)
+        if relpath_shim is not None:
+            relpath_shim.unlink(missing_ok=True)
         shim_log = root_dir / "tmp" / shim_log_name
         if shim_log.is_file():
             emit.debug(

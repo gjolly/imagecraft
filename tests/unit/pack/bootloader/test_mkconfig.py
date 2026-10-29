@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 from imagecraft import errors
+from imagecraft.models import FileSystem
 from imagecraft.pack.bootloader.mkconfig import (
     _GRUB_PROBE_SHIM,
     _fs_internal_path,
@@ -193,7 +194,8 @@ class TestFsInternalPath:
 
 
 class TestProbeShim:
-    def test_shim_answers(self, tmp_path):
+    @pytest.mark.parametrize("root_fs", ["ext2", "btrfs"])
+    def test_shim_answers(self, tmp_path, root_fs):
         """The generated shim produces the expected answers when executed."""
         root_uuid = uuid.uuid4()
         boot_uuid = uuid.uuid4()
@@ -207,6 +209,7 @@ class TestProbeShim:
                 "root_uuid": str(root_uuid),
                 "boot_uuid": str(boot_uuid),
                 "partmap": "msdos",
+                "root_fs": root_fs,
             }
         )
         shim.chmod(0o755)
@@ -227,6 +230,9 @@ class TestProbeShim:
             "--device", "/image-boot", "--target=fs_uuid"
         ).stdout.strip() == str(boot_uuid)
         assert probe("-t", "fs", "/boot/vmlinuz").stdout.strip() == "ext2"
+        assert probe("-t", "fs", "/").stdout.strip() == root_fs
+        assert probe("--device", "/image", "--target=fs").stdout.strip() == root_fs
+        assert probe("--device", "/image-boot", "--target=fs").stdout.strip() == "ext2"
         assert probe("--device", "/image", "--target=partmap").stdout.strip() == "msdos"
         # Empty answers succeed (callers rely on this under set -e).
         empty = probe("--device", "/image", "--target=abstraction")
@@ -235,6 +241,43 @@ class TestProbeShim:
 
 
 class TestGenerateGrubCfg:
+    def test_btrfs_root_uses_image_paths(self, tmp_path, mocker):
+        root_dir = tmp_path / "root"
+        (root_dir / "usr/sbin").mkdir(parents=True)
+        for binary in ("grub-probe", "grub-mkconfig", "grub-mkrelpath"):
+            (root_dir / "usr/sbin" / binary).touch()
+        mock_chroot = mocker.patch(
+            "imagecraft.pack.bootloader.mkconfig.build_prime_chroot"
+        )
+        mock_chroot.return_value.execute.return_value = ""
+        mocker.patch("imagecraft.pack.bootloader.mkconfig._strip_boot_prefix")
+        shims = []
+
+        def check_shims(*args, **kwargs):
+            for mount in kwargs["extra_mounts"]:
+                shims.append(Path(mount._src))
+                if mount._relative_mountpoint == "/usr/sbin/grub-mkrelpath":
+                    result = subprocess.run(
+                        [mount._src, "/"], capture_output=True, text=True, check=True
+                    )
+                    assert result.stdout == "/\n"
+            return mock_chroot.return_value
+
+        mock_chroot.side_effect = check_shims
+        generate_grub_cfg(
+            root_dir,
+            str(uuid.uuid4()),
+            boot_dir=tmp_path / "boot",
+            boot_uuid=str(uuid.uuid4()),
+            root_filesystem=FileSystem.BTRFS,
+        )
+        assert (
+            "GRUB_FS=btrfs\n"
+            in mock_chroot.return_value.execute.call_args.kwargs["grub_defaults"]
+        )
+        assert len(shims) == 2
+        assert all(not shim.exists() for shim in shims)
+
     def test_missing_mkconfig_raises_tools_missing(self, tmp_path):
         with pytest.raises(errors.BootloaderToolsMissingError):
             generate_grub_cfg(tmp_path, uuid.uuid4())

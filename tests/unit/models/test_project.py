@@ -66,6 +66,69 @@ volumes:
         size: 6G
 """
 
+
+@pytest.fixture
+def btrfs_project_data():
+    data = yaml.safe_load(IMAGECRAFT_YAML_GENERIC)
+    data["volumes"]["pc"]["structure"][1]["filesystem"] = "btrfs"
+    data["volumes"]["pc"]["structure"].append(
+        {
+            "name": "boot",
+            "type": "0FC63DAF-8483-4772-8E79-3D69D8477DE4",
+            "filesystem": "ext4",
+            "role": "system-boot",
+            "size": "1G",
+        }
+    )
+    data["filesystems"]["default"].insert(
+        1, {"mount": "/boot/", "device": "(volume/pc/boot)"}
+    )
+    return data
+
+
+def test_btrfs_root_with_efi_and_ext4_boot(btrfs_project_data):
+    project = Project.model_validate(btrfs_project_data)
+    root = project.volumes["pc"].root_partition
+    assert root is not None
+    assert root.filesystem.value == "btrfs"
+
+
+@pytest.mark.parametrize(
+    ("mountpoint", "message"),
+    [("/boot/", "separate ext4"), ("/boot/efi", "require EFI boot")],
+)
+def test_btrfs_missing_boot_mapping(btrfs_project_data, mountpoint, message):
+    btrfs_project_data["filesystems"]["default"] = [
+        entry
+        for entry in btrfs_project_data["filesystems"]["default"]
+        if entry["mount"] != mountpoint
+    ]
+    with pytest.raises(ValidationError, match=message):
+        Project.model_validate(btrfs_project_data)
+
+
+def test_btrfs_requires_ext4_boot(btrfs_project_data):
+    btrfs_project_data["volumes"]["pc"]["structure"][2]["filesystem"] = "ext3"
+    with pytest.raises(ValidationError, match="separate ext4"):
+        Project.model_validate(btrfs_project_data)
+
+
+def test_btrfs_rejects_legacy_boot(btrfs_project_data):
+    btrfs_project_data["volumes"]["pc"]["structure"][0]["type"] = (
+        "21686148-6449-6E6F-744E-656564454649"
+    )
+    with pytest.raises(ValidationError, match="require EFI boot"):
+        Project.model_validate(btrfs_project_data)
+
+
+def test_btrfs_only_supported_at_root(btrfs_project_data):
+    structure = btrfs_project_data["volumes"]["pc"]["structure"]
+    structure[1]["filesystem"] = "ext4"
+    structure[2]["filesystem"] = "btrfs"
+    with pytest.raises(ValidationError, match="only supported for the root"):
+        Project.model_validate(btrfs_project_data)
+
+
 IMAGECRAFT_YAML_SIMPLE_PLATFORM = """
 name: ubuntu-server-amd64
 version: "1"

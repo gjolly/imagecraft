@@ -110,12 +110,12 @@ def configure_fstab(
     filesystem_type = "vfat" if filesystem in _FAT_FILESYSTEMS else filesystem.value
     options = (
         _DEFAULT_FSTAB_OPTIONS
-        if is_root and filesystem not in _FAT_FILESYSTEMS
+        if is_root and filesystem not in (*_FAT_FILESYSTEMS, FileSystem.BTRFS)
         else "defaults"
     )
+    fsck_pass = 0 if filesystem == FileSystem.BTRFS else (1 if is_root else 2)
     fstab_entry = (
-        f"UUID={str_uuid} {mountpoint} {filesystem_type} {options} 0 "
-        f"{1 if is_root else 2}\n"
+        f"UUID={str_uuid} {mountpoint} {filesystem_type} {options} 0 {fsck_pass}\n"
     )
 
     if not fstab_path.is_file():
@@ -354,6 +354,7 @@ class BootloaderInstaller:
                 extra_partition_mounts=extra_partition_mounts,
                 boot_uuid=self.boot_uuid,
                 partition_map=partition_map,
+                root_filesystem=self.root_item.filesystem,
             )
             if boot_method == BootMethod.EFI:
                 assert esp_dir is not None  # noqa: S101
