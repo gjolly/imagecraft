@@ -2,6 +2,10 @@ summary: Boot classic image in QEMU
 
 systems: [ubuntu-24.04-64, ubuntu-24.04-arm-64]
 
+environment:
+  ROOT_FS/ext4: ext4
+  ROOT_FS/btrfs: btrfs
+
 prepare: |
   ARCH=$(dpkg --print-architecture)
   if [ "$ARCH" = "amd64" ]; then
@@ -14,6 +18,37 @@ prepare: |
   fi
 
 execute: |
+  if [ "$ROOT_FS" = "btrfs" ]; then
+    cp imagecraft.yaml imagecraft.yaml.backup
+    python3 - <<'PY'
+  import yaml
+  from pathlib import Path
+
+  path = Path("imagecraft.yaml")
+  project = yaml.safe_load(path.read_text())
+  structure = project["volumes"]["pc"]["structure"]
+  structure[-1]["filesystem"] = "btrfs"
+  structure.insert(1, {
+      "name": "boot",
+      "type": "0FC63DAF-8483-4772-8E79-3D69D8477DE4",
+      "filesystem": "ext4",
+      "role": "system-boot",
+      "size": "1G",
+  })
+  project["filesystems"]["default"].insert(1, {
+      "mount": "/boot", "device": "(volume/pc/boot)",
+  })
+  project["parts"]["rootfs"]["mmdebstrap-packages"].append("btrfs-progs")
+  project["parts"]["fstab"]["overlay-script"] = project["parts"]["fstab"]["overlay-script"].replace(
+      "ext4\tdiscard,errors=remount-ro\t0\t1", "btrfs\tdefaults\t0\t0"
+  )
+  project["parts"]["sentinel-service"]["override-overlay"] = project["parts"]["sentinel-service"]["override-overlay"].replace(
+      "echo HELLO FROM IMAGECRAFT",
+      r"test \$(findmnt -n -o FSTYPE /) = btrfs && test \$(findmnt -n -o FSTYPE /boot) = ext4 && echo HELLO FROM IMAGECRAFT",
+  )
+  path.write_text(yaml.safe_dump(project, sort_keys=False))
+  PY
+  fi
   imagecraft pack --destructive-mode
 
   ARCH=$(dpkg --print-architecture)
@@ -48,6 +83,9 @@ execute: |
 
 restore: |
   imagecraft clean --destructive-mode || true
+  if [ -f imagecraft.yaml.backup ]; then
+    mv imagecraft.yaml.backup imagecraft.yaml
+  fi
   rm -f pc.img output.log /tmp/uefi_vars.fd
 
 debug: |
